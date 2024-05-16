@@ -370,7 +370,7 @@ bool DNSResolver::updateCacheImpl(
 
 bool DNSResolver::updateCache(UInt32 max_consecutive_failures)
 {
-    LOG_DEBUG(log, "Updating DNS cache");
+//    LOG_DEBUG(log, "Updating DNS cache");
 
     {
         String updated_host_name = Poco::Net::DNS::hostName();
@@ -401,7 +401,7 @@ bool DNSResolver::updateCache(UInt32 max_consecutive_failures)
         "Cached addresses not found: {}",
         "Cached addresses dropped: {}");
 
-    LOG_DEBUG(log, "Updated DNS cache");
+//    LOG_DEBUG(log, "Updated DNS cache");
     return hosts_updated;
 }
 

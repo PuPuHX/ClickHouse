@@ -2,6 +2,8 @@
 #include <QueryPipeline/ReadProgressCallback.h>
 #include <Common/Stopwatch.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
+#include <Poco/Logger.h>
+#include "Common/logger_useful.h"
 
 namespace DB
 {
@@ -89,6 +91,7 @@ bool ExecutionThreadContext::executeTask()
 
     try
     {
+//        LOG_DEBUG(&Poco::Logger::get("executeQuery"), "node {} is executing", node->processors_id);
         executeJob(node, read_progress_callback);
         ++node->num_executed_jobs;
     }

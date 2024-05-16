@@ -808,11 +808,13 @@ void TCPHandler::processOrdinaryQueryWithProcessors()
     std::unique_lock progress_lock(task_callback_mutex, std::defer_lock);
 
     {
-        PullingAsyncPipelineExecutor executor(pipeline);
+        // PullingAsyncPipelineExecutor executor(pipeline);
+        PullingPipelineExecutor executor(pipeline);
         CurrentMetrics::Increment query_thread_metric_increment{CurrentMetrics::QueryThread};
 
         Block block;
-        while (executor.pull(block, interactive_delay / 1000))
+        // while (executor.pull(block, interactive_delay / 1000))
+        while (executor.pull(block))
         {
             std::unique_lock lock(task_callback_mutex);
 

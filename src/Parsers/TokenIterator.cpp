@@ -16,6 +16,7 @@ Tokens::Tokens(const char * begin, const char * end, size_t max_query_size)
         if (token.isSignificant())
             data.emplace_back(std::move(token));
     } while (!stop);
+//    printf("\n");
 }
 
 UnmatchedParentheses checkUnmatchedParentheses(TokenIterator begin)

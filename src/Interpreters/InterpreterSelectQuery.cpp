@@ -2305,7 +2305,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         is_remote = true;
         max_threads_execute_query = max_streams = settings.max_distributed_connections;
     }
-
+    // 行数
     UInt64 max_block_size = settings.max_block_size;
 
     auto [limit_length, limit_offset] = getLimitLengthAndOffset(query, context);

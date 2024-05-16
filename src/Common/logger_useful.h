@@ -8,7 +8,10 @@
 #include <Common/CurrentThread.h>
 #include <Common/LoggingFormatStringHelpers.h>
 
-namespace Poco { class Logger; }
+namespace Poco
+{
+class Logger;
+}
 
 /// This wrapper is useful to save formatted message into a String before sending it to a logger
 class LogToStrImpl
@@ -16,11 +19,16 @@ class LogToStrImpl
     String & out_str;
     Poco::Logger * logger;
     bool propagate_to_actual_log = true;
+
 public:
-    LogToStrImpl(String & out_str_, Poco::Logger * logger_) : out_str(out_str_) , logger(logger_) {}
-    LogToStrImpl & operator -> () { return *this; }
-    bool is(Poco::Message::Priority priority) { propagate_to_actual_log &= logger->is(priority); return true; }
-    LogToStrImpl * getChannel() {return this; }
+    LogToStrImpl(String & out_str_, Poco::Logger * logger_) : out_str(out_str_), logger(logger_) { }
+    LogToStrImpl & operator->() { return *this; }
+    bool is(Poco::Message::Priority priority)
+    {
+        propagate_to_actual_log &= logger->is(priority);
+        return true;
+    }
+    LogToStrImpl * getChannel() { return this; }
     const String & name() const { return logger->name(); }
     void log(const Poco::Message & message)
     {
@@ -36,9 +44,18 @@ public:
 
 namespace
 {
-    [[maybe_unused]] const ::Poco::Logger * getLogger(const ::Poco::Logger * logger) { return logger; };
-    [[maybe_unused]] const ::Poco::Logger * getLogger(const std::atomic<::Poco::Logger *> & logger) { return logger.load(); };
-    [[maybe_unused]] std::unique_ptr<LogToStrImpl> getLogger(std::unique_ptr<LogToStrImpl> && logger) { return logger; };
+[[maybe_unused]] const ::Poco::Logger * getLogger(const ::Poco::Logger * logger)
+{
+    return logger;
+};
+[[maybe_unused]] const ::Poco::Logger * getLogger(const std::atomic<::Poco::Logger *> & logger)
+{
+    return logger.load();
+};
+[[maybe_unused]] std::unique_ptr<LogToStrImpl> getLogger(std::unique_ptr<LogToStrImpl> && logger)
+{
+    return logger;
+};
 }
 
 #define LOG_IMPL_FIRST_ARG(X, ...) X
@@ -57,6 +74,8 @@ namespace
     if (_is_clients_log || _logger->is((PRIORITY)))                               \
     {                                                                             \
         std::string formatted_message = numArgs(__VA_ARGS__) > 1 ? fmt::format(__VA_ARGS__) : firstArg(__VA_ARGS__); \
+            formatted_message += std::string(" ") + std::string(__FILE__) + std::string(":") + std::to_string(__LINE__); \
+                                                                                  \
         formatStringCheckArgsNum(__VA_ARGS__);                                    \
         if (auto _channel = _logger->getChannel())                                \
         {                                                                         \
@@ -72,10 +91,10 @@ namespace
 } while (false)
 
 
-#define LOG_TEST(logger, ...)    LOG_IMPL(logger, DB::LogsLevel::test, Poco::Message::PRIO_TEST, __VA_ARGS__)
-#define LOG_TRACE(logger, ...)   LOG_IMPL(logger, DB::LogsLevel::trace, Poco::Message::PRIO_TRACE, __VA_ARGS__)
-#define LOG_DEBUG(logger, ...)   LOG_IMPL(logger, DB::LogsLevel::debug, Poco::Message::PRIO_DEBUG, __VA_ARGS__)
-#define LOG_INFO(logger, ...)    LOG_IMPL(logger, DB::LogsLevel::information, Poco::Message::PRIO_INFORMATION, __VA_ARGS__)
+#define LOG_TEST(logger, ...) LOG_IMPL(logger, DB::LogsLevel::test, Poco::Message::PRIO_TEST, __VA_ARGS__)
+#define LOG_TRACE(logger, ...) LOG_IMPL(logger, DB::LogsLevel::trace, Poco::Message::PRIO_TRACE, __VA_ARGS__)
+#define LOG_DEBUG(logger, ...) LOG_IMPL(logger, DB::LogsLevel::debug, Poco::Message::PRIO_DEBUG, __VA_ARGS__)
+#define LOG_INFO(logger, ...) LOG_IMPL(logger, DB::LogsLevel::information, Poco::Message::PRIO_INFORMATION, __VA_ARGS__)
 #define LOG_WARNING(logger, ...) LOG_IMPL(logger, DB::LogsLevel::warning, Poco::Message::PRIO_WARNING, __VA_ARGS__)
-#define LOG_ERROR(logger, ...)   LOG_IMPL(logger, DB::LogsLevel::error, Poco::Message::PRIO_ERROR, __VA_ARGS__)
-#define LOG_FATAL(logger, ...)   LOG_IMPL(logger, DB::LogsLevel::error, Poco::Message::PRIO_FATAL, __VA_ARGS__)
+#define LOG_ERROR(logger, ...) LOG_IMPL(logger, DB::LogsLevel::error, Poco::Message::PRIO_ERROR, __VA_ARGS__)
+#define LOG_FATAL(logger, ...) LOG_IMPL(logger, DB::LogsLevel::error, Poco::Message::PRIO_FATAL, __VA_ARGS__)

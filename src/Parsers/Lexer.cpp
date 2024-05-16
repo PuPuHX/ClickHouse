@@ -1,8 +1,9 @@
 #include <cassert>
-#include <base/defines.h>
 #include <Parsers/Lexer.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <base/defines.h>
 #include <base/find_symbols.h>
+#include <fmt/format.h>
+#include <Common/StringUtils/StringUtils.h>
 
 namespace DB
 {
@@ -10,70 +11,70 @@ namespace DB
 namespace
 {
 
-/// This must be consistent with functions in ReadHelpers.h
-template <char quote, TokenType success_token, TokenType error_token>
-Token quotedString(const char *& pos, const char * const token_begin, const char * const end)
-{
-    ++pos;
-    while (true)
+    /// This must be consistent with functions in ReadHelpers.h
+    template <char quote, TokenType success_token, TokenType error_token>
+    Token quotedString(const char *& pos, const char * const token_begin, const char * const end)
     {
-        pos = find_first_symbols<quote, '\\'>(pos, end);
-        if (pos >= end)
-            return Token(error_token, token_begin, end);
-
-        if (*pos == quote)
+        ++pos;
+        while (true)
         {
-            ++pos;
-            if (pos < end && *pos == quote)
+            pos = find_first_symbols<quote, '\\'>(pos, end);
+            if (pos >= end)
+                return Token(error_token, token_begin, end);
+
+            if (*pos == quote)
             {
+                ++pos;
+                if (pos < end && *pos == quote)
+                {
+                    ++pos;
+                    continue;
+                }
+                return Token(success_token, token_begin, pos);
+            }
+
+            if (*pos == '\\')
+            {
+                ++pos;
+                if (pos >= end)
+                    return Token(error_token, token_begin, end);
                 ++pos;
                 continue;
             }
-            return Token(success_token, token_begin, pos);
-        }
 
-        if (*pos == '\\')
+            UNREACHABLE();
+        }
+    }
+
+    Token quotedHexOrBinString(const char *& pos, const char * const token_begin, const char * const end)
+    {
+        constexpr char quote = '\'';
+
+        assert(pos[1] == quote);
+
+        bool hex = (*pos == 'x' || *pos == 'X');
+
+        pos += 2;
+
+        if (hex)
         {
-            ++pos;
-            if (pos >= end)
-                return Token(error_token, token_begin, end);
-            ++pos;
-            continue;
+            while (pos < end && isHexDigit(*pos))
+                ++pos;
+        }
+        else
+        {
+            pos = find_first_not_symbols<'0', '1'>(pos, end);
         }
 
-        UNREACHABLE();
+        if (pos >= end || *pos != quote)
+        {
+            pos = end;
+            return Token(TokenType::ErrorSingleQuoteIsNotClosed, token_begin, end);
+        }
+
+        ++pos;
+        return Token(TokenType::StringLiteral, token_begin, pos);
     }
-}
-
-Token quotedHexOrBinString(const char *& pos, const char * const token_begin, const char * const end)
-{
-    constexpr char quote = '\'';
-
-    assert(pos[1] == quote);
-
-    bool hex = (*pos == 'x' || *pos == 'X');
-
-    pos += 2;
-
-    if (hex)
-    {
-        while (pos < end && isHexDigit(*pos))
-            ++pos;
-    }
-    else
-    {
-        pos = find_first_not_symbols<'0', '1'>(pos, end);
-    }
-
-    if (pos >= end || *pos != quote)
-    {
-        pos = end;
-        return Token(TokenType::ErrorSingleQuoteIsNotClosed, token_begin, end);
-    }
-
-    ++pos;
-    return Token(TokenType::StringLiteral, token_begin, pos);
-}
 
 }
 
@@ -81,6 +82,7 @@ Token quotedHexOrBinString(const char *& pos, const char * const token_begin, co
 Token Lexer::nextToken()
 {
     Token res = nextTokenImpl();
+//    std::cout << fmt::format("<{}>({})\n", getTokenName(res.type), std::string_view(res.begin, res.end - res.begin));
     if (max_query_size && res.end > begin + max_query_size)
         res.type = TokenType::ErrorMaxQuerySizeExceeded;
     if (res.isSignificant())
@@ -98,7 +100,7 @@ Token Lexer::nextTokenImpl()
 
     auto comment_until_end_of_line = [&]() mutable
     {
-        pos = find_first_symbols<'\n'>(pos, end);    /// This means that newline in single-line comment cannot be escaped.
+        pos = find_first_symbols<'\n'>(pos, end); /// This means that newline in single-line comment cannot be escaped.
         return Token(TokenType::Comment, token_begin, pos);
     };
 
@@ -109,8 +111,7 @@ Token Lexer::nextTokenImpl()
         case '\n':
         case '\r':
         case '\f':
-        case '\v':
-        {
+        case '\v': {
             ++pos;
             while (pos < end && isWhitespaceASCII(*pos))
                 ++pos;
@@ -126,8 +127,7 @@ Token Lexer::nextTokenImpl()
         case '6':
         case '7':
         case '8':
-        case '9':
-        {
+        case '9': {
             /// The task is not to parse a number or check correctness, but only to skip it.
 
             /// Disambiguation: if previous token was dot, then we could parse only simple integer,
@@ -179,7 +179,8 @@ Token Lexer::nextTokenImpl()
                 {
                     start_of_block = true;
                     ++pos;
-                    while (pos < end && ((hex ? isHexDigit(*pos) : isNumericASCII(*pos)) || isNumberSeparator(start_of_block, hex, pos, end)))
+                    while (pos < end
+                           && ((hex ? isHexDigit(*pos) : isNumericASCII(*pos)) || isNumberSeparator(start_of_block, hex, pos, end)))
                     {
                         ++pos;
                         start_of_block = false;
@@ -247,16 +248,13 @@ Token Lexer::nextTokenImpl()
         case ';':
             return Token(TokenType::Semicolon, token_begin, ++pos);
 
-        case '.':   /// qualifier, tuple access operator or start of floating point number
+        case '.': /// qualifier, tuple access operator or start of floating point number
         {
             /// Just after identifier or complex expression or number (for chained tuple access like x.1.1 to work properly).
             if (pos > begin
-                && (!(pos + 1 < end && isNumericASCII(pos[1]))
-                    || prev_significant_token_type == TokenType::ClosingRoundBracket
-                    || prev_significant_token_type == TokenType::ClosingSquareBracket
-                    || prev_significant_token_type == TokenType::BareWord
-                    || prev_significant_token_type == TokenType::QuotedIdentifier
-                    || prev_significant_token_type == TokenType::Number))
+                && (!(pos + 1 < end && isNumericASCII(pos[1])) || prev_significant_token_type == TokenType::ClosingRoundBracket
+                    || prev_significant_token_type == TokenType::ClosingSquareBracket || prev_significant_token_type == TokenType::BareWord
+                    || prev_significant_token_type == TokenType::QuotedIdentifier || prev_significant_token_type == TokenType::Number))
                 return Token(TokenType::Dot, token_begin, ++pos);
 
             bool start_of_block = true;
@@ -289,7 +287,7 @@ Token Lexer::nextTokenImpl()
 
         case '+':
             return Token(TokenType::Plus, token_begin, ++pos);
-        case '-':   /// minus (-), arrow (->) or start of comment (--)
+        case '-': /// minus (-), arrow (->) or start of comment (--)
         {
             ++pos;
             if (pos < end && *pos == '>')
@@ -306,7 +304,7 @@ Token Lexer::nextTokenImpl()
         case '*':
             ++pos;
             return Token(TokenType::Asterisk, token_begin, pos);
-        case '/':   /// division (/) or start of comment (//, /*)
+        case '/': /// division (/) or start of comment (//, /*)
         {
             ++pos;
             if (pos < end && (*pos == '/' || *pos == '*'))
@@ -347,13 +345,13 @@ Token Lexer::nextTokenImpl()
             }
             return Token(TokenType::Slash, token_begin, pos);
         }
-        case '#':   /// start of single line comment, MySQL style
-        {           /// PostgreSQL has some operators using '#' character.
-                    /// For less ambiguity, we will recognize a comment only if # is followed by whitespace.
-                    /// or #! as a special case for "shebang".
-                    /// #hello - not a comment
-                    /// # hello - a comment
-                    /// #!/usr/bin/clickhouse-local --queries-file - a comment
+        case '#': /// start of single line comment, MySQL style
+        { /// PostgreSQL has some operators using '#' character.
+            /// For less ambiguity, we will recognize a comment only if # is followed by whitespace.
+            /// or #! as a special case for "shebang".
+            /// #hello - not a comment
+            /// # hello - a comment
+            /// #!/usr/bin/clickhouse-local --queries-file - a comment
             ++pos;
             if (pos < end && (*pos == ' ' || *pos == '!'))
                 return comment_until_end_of_line();
@@ -361,21 +359,21 @@ Token Lexer::nextTokenImpl()
         }
         case '%':
             return Token(TokenType::Percent, token_begin, ++pos);
-        case '=':   /// =, ==
+        case '=': /// =, ==
         {
             ++pos;
             if (pos < end && *pos == '=')
                 ++pos;
             return Token(TokenType::Equals, token_begin, pos);
         }
-        case '!':   /// !=
+        case '!': /// !=
         {
             ++pos;
             if (pos < end && *pos == '=')
                 return Token(TokenType::NotEquals, token_begin, ++pos);
             return Token(TokenType::ErrorSingleExclamationMark, token_begin, pos);
         }
-        case '<':   /// <, <=, <>
+        case '<': /// <, <=, <>
         {
             ++pos;
             if (pos < end && *pos == '=')
@@ -384,7 +382,7 @@ Token Lexer::nextTokenImpl()
                 return Token(TokenType::NotEquals, token_begin, ++pos);
             return Token(TokenType::Less, token_begin, pos);
         }
-        case '>':   /// >, >=
+        case '>': /// >, >=
         {
             ++pos;
             if (pos < end && *pos == '=')
@@ -393,29 +391,25 @@ Token Lexer::nextTokenImpl()
         }
         case '?':
             return Token(TokenType::QuestionMark, token_begin, ++pos);
-        case ':':
-        {
+        case ':': {
             ++pos;
             if (pos < end && *pos == ':')
                 return Token(TokenType::DoubleColon, token_begin, ++pos);
             return Token(TokenType::Colon, token_begin, pos);
         }
-        case '|':
-        {
+        case '|': {
             ++pos;
             if (pos < end && *pos == '|')
                 return Token(TokenType::Concatenation, token_begin, ++pos);
             return Token(TokenType::PipeMark, token_begin, pos);
         }
-        case '@':
-        {
+        case '@': {
             ++pos;
             if (pos < end && *pos == '@')
                 return Token(TokenType::DoubleAt, token_begin, ++pos);
             return Token(TokenType::At, token_begin, pos);
         }
-        case '\\':
-        {
+        case '\\': {
             ++pos;
             if (pos < end && *pos == 'G')
                 return Token(TokenType::VerticalDelimiter, token_begin, ++pos);
@@ -437,7 +431,6 @@ Token Lexer::nextTokenImpl()
                     size_t heredoc_end_position = token_stream.find(heredoc, heredoc_size);
                     if (heredoc_end_position != std::string::npos)
                     {
-
                         pos += heredoc_end_position;
                         pos += heredoc_size;
 
@@ -482,8 +475,9 @@ const char * getTokenName(TokenType type)
     switch (type)
     {
 #define M(TOKEN) \
-        case TokenType::TOKEN: return #TOKEN;
-APPLY_FOR_TOKENS(M)
+    case TokenType::TOKEN: \
+        return #TOKEN;
+        APPLY_FOR_TOKENS(M)
 #undef M
     }
 

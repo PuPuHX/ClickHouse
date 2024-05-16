@@ -112,6 +112,7 @@ bool PipelineExecutor::executeStep(std::atomic_bool * yield_flag)
 {
     if (!is_execution_initialized)
     {
+        printGraph();
         initializeExecution(1);
 
         // Acquire slot until we are done
@@ -168,6 +169,47 @@ void PipelineExecutor::setReadProgressCallback(ReadProgressCallbackPtr callback)
     read_progress_callback = std::move(callback);
 }
 
+void PipelineExecutor::printGraph() {
+    using NodeId = size_t;
+
+    auto n = graph->nodes.size();
+    auto& nodes = graph->nodes;
+
+    std::deque<NodeId> que, next_level;
+    for (size_t i = 0; i < n; ++i) {
+        auto &node = nodes[i];
+        if (node->back_edges.empty()) {
+            next_level.push_back(i);
+        } else {
+            break;
+        }
+    }
+
+    while (!next_level.empty()) {
+        que = std::move(next_level);
+        auto name = nodes[que.front()]->processor->getName();
+        std::string s = ": \n";
+        for (auto id: que) {
+            auto &node = nodes[id];
+            s += node->processor->getName() + " from " + std::to_string(id) + " to ";
+
+            for (auto &edge: node->direct_edges) {
+                auto peer_id = edge.to;
+                s += std::to_string(peer_id) + ", ";
+                if (!next_level.empty() && next_level.back() == peer_id) { // NOLINT
+                    continue;
+                }
+                next_level.push_back(peer_id);
+            }
+            s += "\n";
+        }
+        
+        LOG_DEBUG(&Poco::Logger::get("executeQuery"), "{}", s);
+    } 
+    
+
+}
+
 void PipelineExecutor::finalizeExecution()
 {
     checkTimeLimit();
@@ -196,7 +238,7 @@ void PipelineExecutor::executeSingleThread(size_t thread_num)
 
 #ifndef NDEBUG
     auto & context = tasks.getThreadContext(thread_num);
-    LOG_TEST(log,
+    LOG_DEBUG(log,
               "Thread finished. Total time: {} sec. Execution time: {} sec. Processing time: {} sec. Wait time: {} sec.",
               context.total_time_ns / 1e9,
               context.execution_time_ns / 1e9,
@@ -371,6 +413,7 @@ void PipelineExecutor::executeImpl(size_t num_threads)
         auto slot = slots->tryAcquire();
         executeSingleThread(0);
     }
+    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "pipeline:{}", dumpPipeline());
 
     finished_flag = true;
 }

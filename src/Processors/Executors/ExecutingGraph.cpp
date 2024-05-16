@@ -1,6 +1,7 @@
 #include <Processors/Executors/ExecutingGraph.h>
 #include <stack>
 #include <Common/Stopwatch.h>
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -211,6 +212,7 @@ bool ExecutingGraph::updateNode(uint64_t pid, Queue & queue, Queue & async_queue
     std::stack<Edge *> updated_edges;
     std::stack<uint64_t> updated_processors;
     updated_processors.push(pid);
+    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "===============================");
 
     UpgradableMutex::ReadGuard read_lock(nodes_mutex);
 
@@ -244,8 +246,10 @@ bool ExecutingGraph::updateNode(uint64_t pid, Queue & queue, Queue & async_queue
                     updated_processors.push(edge->to);
                     stack_top_lock = std::move(lock);
                 }
-                else
+                else {
                     nodes[edge->to]->processor->onUpdatePorts();
+                    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "nodes[{}] is on update ports", edge->to);
+                }
             }
         }
 
@@ -275,6 +279,7 @@ bool ExecutingGraph::updateNode(uint64_t pid, Queue & queue, Queue & async_queue
                     IProcessor::Status last_status = node.last_processor_status;
                     IProcessor::Status status = processor.prepare(node.updated_input_ports, node.updated_output_ports);
                     node.last_processor_status = status;
+                    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "node{} Processor({})上次状态:{}当前状态:{}", pid, processor.getName(), processor.statusToName(last_status), processor.statusToName(status));
 
                     if (profile_processors)
                     {

@@ -59,6 +59,8 @@ public:
     /// It would be called every time when processor reports read progress.
     void setReadProgressCallback(ReadProgressCallbackPtr callback);
 
+    void printGraph();
+
 private:
     ExecutingGraphPtr graph;
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <absl/container/inlined_vector.h>
 #include <memory>
+#include <absl/container/inlined_vector.h>
 
 #include <Core/Defines.h>
 #include <Parsers/IAST_fwd.h>
@@ -42,10 +42,7 @@ struct Expected
             variants.push_back(description);
     }
 
-    ALWAYS_INLINE void add(TokenIterator it, const char * description)
-    {
-        add(it->begin, description);
-    }
+    ALWAYS_INLINE void add(TokenIterator it, const char * description) { add(it->begin, description); }
 };
 
 
@@ -60,9 +57,7 @@ public:
         uint32_t depth = 0;
         uint32_t max_depth = 0;
 
-        Pos(Tokens & tokens_, uint32_t max_depth_) : TokenIterator(tokens_), max_depth(max_depth_)
-        {
-        }
+        Pos(Tokens & tokens_, uint32_t max_depth_) : TokenIterator(tokens_), max_depth(max_depth_) { }
 
         Pos(TokenIterator token_iterator_, uint32_t max_depth_) : TokenIterator(token_iterator_), max_depth(max_depth_) { }
 
@@ -70,8 +65,11 @@ public:
         {
             ++depth;
             if (unlikely(max_depth > 0 && depth > max_depth))
-                throw Exception(ErrorCodes::TOO_DEEP_RECURSION, "Maximum parse depth ({}) exceeded. "
-                    "Consider rising max_parser_depth parameter.", max_depth);
+                throw Exception(
+                    ErrorCodes::TOO_DEEP_RECURSION,
+                    "Maximum parse depth ({}) exceeded. "
+                    "Consider rising max_parser_depth parameter.",
+                    max_depth);
         }
 
         ALWAYS_INLINE void decreaseDepth()
@@ -84,6 +82,8 @@ public:
 
     /** Get the text of this parser parses. */
     virtual const char * getName() const = 0;
+
+    virtual const char * getParserName() const { return typeid(*this).name(); }
 
     /** Parse piece of text from position `pos`, but not beyond end of line (`end` - position after end of line),
       * move pointer `pos` to the maximum position to which it was possible to parse,

@@ -1219,9 +1219,11 @@ void ActionsMatcher::visit(const ASTFunction & node, const ASTPtr & ast, Data & 
             {
                 /// If the argument is not a lambda expression, call it recursively and find out its type.
                 visit(child, data);
-
+                LOG_DEBUG(&Poco::Logger::get("executeQuery"), "visited:{}", column_name);
                 if (auto name_type = getNameAndTypeFromAST(child, data))
                 {
+                    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "argument_types:{} argument_names:{}", name_type->type->getName(), name_type->name);
+
                     argument_types.push_back(name_type->type);
                     argument_names.push_back(name_type->name);
                 }

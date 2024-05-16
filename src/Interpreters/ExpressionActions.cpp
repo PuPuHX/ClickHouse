@@ -1,38 +1,39 @@
-#include <Interpreters/Set.h>
-#include <Common/ProfileEvents.h>
-#include <Interpreters/ArrayJoinAction.h>
-#include <Interpreters/ExpressionActions.h>
-#include <Interpreters/TableJoin.h>
-#include <Interpreters/Context.h>
+#include <optional>
+#include <queue>
+#include <stack>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnFunction.h>
-#include <Common/typeid_cast.h>
+#include <Columns/ColumnSet.h>
+#include <Core/SettingsEnums.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Functions/IFunction.h>
-#include <IO/WriteBufferFromString.h>
 #include <IO/Operators.h>
-#include <optional>
-#include <Columns/ColumnSet.h>
-#include <queue>
-#include <stack>
+#include <IO/WriteBufferFromString.h>
+#include <Interpreters/ArrayJoinAction.h>
+#include <Interpreters/Context.h>
+#include <Interpreters/ExpressionActions.h>
+#include <Interpreters/Set.h>
+#include <Interpreters/TableJoin.h>
 #include <base/sort.h>
+#include <Poco/Logger.h>
+#include "Common/logger_useful.h"
 #include <Common/JSONBuilder.h>
-#include <Core/SettingsEnums.h>
-
+#include <Common/ProfileEvents.h>
+#include <Common/typeid_cast.h>
 
 #if defined(MEMORY_SANITIZER)
-    #include <sanitizer/msan_interface.h>
+#    include <sanitizer/msan_interface.h>
 #endif
 
 #if defined(ADDRESS_SANITIZER)
-    #include <sanitizer/asan_interface.h>
+#    include <sanitizer/asan_interface.h>
 #endif
 
 namespace ProfileEvents
 {
-    extern const Event FunctionExecute;
-    extern const Event CompiledFunctionExecute;
+extern const Event FunctionExecute;
+extern const Event CompiledFunctionExecute;
 }
 
 namespace DB
@@ -47,15 +48,16 @@ namespace ErrorCodes
     extern const int TYPE_MISMATCH;
 }
 
-static std::unordered_set<const ActionsDAG::Node *> processShortCircuitFunctions(const ActionsDAG & actions_dag, ShortCircuitFunctionEvaluation short_circuit_function_evaluation);
+static std::unordered_set<const ActionsDAG::Node *>
+processShortCircuitFunctions(const ActionsDAG & actions_dag, ShortCircuitFunctionEvaluation short_circuit_function_evaluation);
 
-ExpressionActions::ExpressionActions(ActionsDAGPtr actions_dag_, const ExpressionActionsSettings & settings_)
-    : settings(settings_)
+ExpressionActions::ExpressionActions(ActionsDAGPtr actions_dag_, const ExpressionActionsSettings & settings_) : settings(settings_)
 {
     actions_dag = actions_dag_->clone();
 
     /// It's important to determine lazy executed nodes before compiling expressions.
-    std::unordered_set<const ActionsDAG::Node *> lazy_executed_nodes = processShortCircuitFunctions(*actions_dag, settings.short_circuit_function_evaluation);
+    std::unordered_set<const ActionsDAG::Node *> lazy_executed_nodes
+        = processShortCircuitFunctions(*actions_dag, settings.short_circuit_function_evaluation);
 
 #if USE_EMBEDDED_COMPILER
     if (settings.can_compile_expressions && settings.compile_expressions == CompileExpressions::yes)
@@ -65,9 +67,11 @@ ExpressionActions::ExpressionActions(ActionsDAGPtr actions_dag_, const Expressio
     linearizeActions(lazy_executed_nodes);
 
     if (settings.max_temporary_columns && num_columns > settings.max_temporary_columns)
-        throw Exception(ErrorCodes::TOO_MANY_TEMPORARY_COLUMNS,
-                        "Too many temporary columns: {}. Maximum: {}",
-                        actions_dag->dumpNames(), settings.max_temporary_columns);
+        throw Exception(
+            ErrorCodes::TOO_MANY_TEMPORARY_COLUMNS,
+            "Too many temporary columns: {}. Maximum: {}",
+            actions_dag->dumpNames(),
+            settings.max_temporary_columns);
 }
 
 ExpressionActionsPtr ExpressionActions::clone() const
@@ -158,7 +162,8 @@ static void setLazyExecutionInfo(
     const ActionsDAGReverseInfo::NodeInfo & node_info = reverse_info.nodes_info[reverse_info.reverse_index.at(node)];
 
     /// If node is used in result or it doesn't have parents, we can't enable lazy execution.
-    if (node_info.used_in_result || node_info.parents.empty() || (node->type != ActionsDAG::ActionType::FUNCTION && node->type != ActionsDAG::ActionType::ALIAS))
+    if (node_info.used_in_result || node_info.parents.empty()
+        || (node->type != ActionsDAG::ActionType::FUNCTION && node->type != ActionsDAG::ActionType::ALIAS))
     {
         lazy_execution_info.can_be_lazy_executed = false;
         return;
@@ -252,16 +257,18 @@ static bool findLazyExecutedNodes(
         /// the offset that is differ from what we would get without filtering.
         switch (child->type)
         {
-            case ActionsDAG::ActionType::FUNCTION:
-            {
+            case ActionsDAG::ActionType::FUNCTION: {
                 /// Propagate lazy execution through function arguments.
-                bool has_lazy_child = findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
+                bool has_lazy_child
+                    = findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
 
                 /// Use lazy execution when:
                 ///  - It's force enabled.
                 ///  - Function is suitable for lazy execution.
                 ///  - Function has lazy executed arguments.
-                if (force_enable_lazy_execution || has_lazy_child || child->function_base->isSuitableForShortCircuitArgumentsExecution(getDataTypesWithConstInfoFromNodes(child->children)))
+                if (force_enable_lazy_execution || has_lazy_child
+                    || child->function_base->isSuitableForShortCircuitArgumentsExecution(
+                        getDataTypesWithConstInfoFromNodes(child->children)))
                 {
                     has_lazy_node = true;
                     lazy_executed_nodes_out.insert(child);
@@ -270,7 +277,8 @@ static bool findLazyExecutedNodes(
             }
             case ActionsDAG::ActionType::ALIAS:
                 /// Propagate lazy execution through alias.
-                has_lazy_node |= findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
+                has_lazy_node
+                    |= findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
                 break;
             default:
                 break;
@@ -279,7 +287,8 @@ static bool findLazyExecutedNodes(
     return has_lazy_node;
 }
 
-static std::unordered_set<const ActionsDAG::Node *> processShortCircuitFunctions(const ActionsDAG & actions_dag, ShortCircuitFunctionEvaluation short_circuit_function_evaluation)
+static std::unordered_set<const ActionsDAG::Node *>
+processShortCircuitFunctions(const ActionsDAG & actions_dag, ShortCircuitFunctionEvaluation short_circuit_function_evaluation)
 {
     if (short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
         return {};
@@ -291,7 +300,8 @@ static std::unordered_set<const ActionsDAG::Node *> processShortCircuitFunctions
     IFunctionBase::ShortCircuitSettings short_circuit_settings;
     for (const auto & node : nodes)
     {
-        if (node.type == ActionsDAG::ActionType::FUNCTION && node.function_base->isShortCircuit(short_circuit_settings, node.children.size()) && !node.children.empty())
+        if (node.type == ActionsDAG::ActionType::FUNCTION
+            && node.function_base->isShortCircuit(short_circuit_settings, node.children.size()) && !node.children.empty())
             short_circuit_nodes[&node] = short_circuit_settings;
     }
 
@@ -333,8 +343,17 @@ void ExpressionActions::linearizeActions(const std::unordered_set<const ActionsD
     };
 
     const auto & nodes = getNodes();
+    // for (const auto &node: nodes) {
+    //     LOG_DEBUG(&Poco::Logger::get("executeQuery"), "Topo list: {}", node.result_name);
+    // }
     const auto & outputs = actions_dag->getOutputs();
+    // for (const auto &node: outputs) {
+    //     LOG_DEBUG(&Poco::Logger::get("executeQuery"), "Outputs: {}", node->result_name);
+    // }
     const auto & inputs = actions_dag->getInputs();
+    // for (const auto &node: inputs) {
+    //     LOG_DEBUG(&Poco::Logger::get("executeQuery"), "Inputs: {}", node->result_name);
+    // }
 
     auto reverse_info = getActionsDAGReverseInfo(nodes, outputs);
     std::vector<Data> data;
@@ -452,7 +471,7 @@ void ExpressionActions::linearizeActions(const std::unordered_set<const ActionsD
 }
 
 
-static WriteBuffer & operator << (WriteBuffer & out, const ExpressionActions::Argument & argument)
+static WriteBuffer & operator<<(WriteBuffer & out, const ExpressionActions::Argument & argument)
 {
     return out << (argument.needed_later ? ": " : ":: ") << argument.pos;
 }
@@ -463,8 +482,7 @@ std::string ExpressionActions::Action::toString() const
     switch (node->type)
     {
         case ActionsDAG::ActionType::COLUMN:
-            out << "COLUMN "
-                << (node->column ? node->column->getName() : "(no column)");
+            out << "COLUMN " << (node->column ? node->column->getName() : "(no column)");
             break;
 
         case ActionsDAG::ActionType::ALIAS:
@@ -492,8 +510,8 @@ std::string ExpressionActions::Action::toString() const
             break;
     }
 
-    out << " -> " << node->result_name
-        << " " << (node->result_type ? node->result_type->getName() : "(no type)") << " : " << result_position;
+    out << " -> " << node->result_name << " " << (node->result_type ? node->result_type->getName() : "(no type)") << " : "
+        << result_position;
     return out.str();
 }
 
@@ -536,9 +554,11 @@ void ExpressionActions::checkLimits(const ColumnsWithTypeAndName & columns) cons
                 if (column.column && !isColumnConst(*column.column))
                     list_of_non_const_columns << "\n" << column.name;
 
-            throw Exception(ErrorCodes::TOO_MANY_TEMPORARY_NON_CONST_COLUMNS,
+            throw Exception(
+                ErrorCodes::TOO_MANY_TEMPORARY_NON_CONST_COLUMNS,
                 "Too many temporary non-const columns:{}. Maximum: {}",
-                list_of_non_const_columns.str(), settings.max_temporary_non_const_columns);
+                list_of_non_const_columns.str(),
+                settings.max_temporary_non_const_columns);
         }
     }
 }
@@ -571,8 +591,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
 
     switch (action.node->type)
     {
-        case ActionsDAG::ActionType::FUNCTION:
-        {
+        case ActionsDAG::ActionType::FUNCTION: {
             auto & res_column = columns[action.result_position];
             if (res_column.type || res_column.column)
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Result column is not empty");
@@ -615,8 +634,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
             break;
         }
 
-        case ActionsDAG::ActionType::ARRAY_JOIN:
-        {
+        case ActionsDAG::ActionType::ARRAY_JOIN: {
             size_t array_join_key_pos = action.arguments.front().pos;
             auto array_join_key = columns[array_join_key_pos];
 
@@ -648,8 +666,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
             break;
         }
 
-        case ActionsDAG::ActionType::COLUMN:
-        {
+        case ActionsDAG::ActionType::COLUMN: {
             auto & res_column = columns[action.result_position];
             res_column.column = action.node->column->cloneResized(num_rows);
             res_column.type = action.node->result_type;
@@ -657,8 +674,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
             break;
         }
 
-        case ActionsDAG::ActionType::ALIAS:
-        {
+        case ActionsDAG::ActionType::ALIAS: {
             const auto & arg = action.arguments.front();
             if (action.result_position != arg.pos)
             {
@@ -674,17 +690,14 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
             break;
         }
 
-        case ActionsDAG::ActionType::INPUT:
-        {
+        case ActionsDAG::ActionType::INPUT: {
             auto pos = execution_context.inputs_pos[action.arguments.front().pos];
             if (pos < 0)
             {
                 /// Here we allow to skip input if it is not in block (in case it is not needed).
                 /// It may be unusual, but some code depend on such behaviour.
                 if (action.arguments.front().needed_later)
-                    throw Exception(ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK,
-                                    "Not found column {} in block",
-                                    action.node->result_name);
+                    throw Exception(ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK, "Not found column {} in block", action.node->result_name);
             }
             else
                 columns[action.result_position] = std::move(inputs[pos]);
@@ -696,8 +709,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
 
 void ExpressionActions::execute(Block & block, size_t & num_rows, bool dry_run) const
 {
-    ExecutionContext execution_context
-    {
+    ExecutionContext execution_context{
         .inputs = block.data,
         .num_rows = num_rows,
     };
@@ -727,6 +739,8 @@ void ExpressionActions::execute(Block & block, size_t & num_rows, bool dry_run) 
     {
         try
         {
+            LOG_DEBUG(
+                &Poco::Logger::get("executeQuery"), "action: {} is_lazy_executed: {}", action.node->result_name, action.is_lazy_executed);
             executeAction(action, execution_context, dry_run);
             checkLimits(execution_context.columns);
 
@@ -981,8 +995,7 @@ void ExpressionActionsChain::finalize()
 
         /// If unnecessary columns are formed at the output of the previous step, we'll add them to the beginning of this step.
         /// Except when we drop all the columns and lose the number of rows in the block.
-        if (!steps[i]->getResultColumns().empty()
-            && columns_from_previous > steps[i]->getRequiredColumns().size())
+        if (!steps[i]->getResultColumns().empty() && columns_from_previous > steps[i]->getRequiredColumns().size())
             steps[i]->prependProjectInput();
     }
 }
@@ -1004,9 +1017,7 @@ std::string ExpressionActionsChain::dumpChain() const
 }
 
 ExpressionActionsChain::ArrayJoinStep::ArrayJoinStep(ArrayJoinActionPtr array_join_, ColumnsWithTypeAndName required_columns_)
-    : Step({})
-    , array_join(std::move(array_join_))
-    , result_columns(std::move(required_columns_))
+    : Step({}), array_join(std::move(array_join_)), result_columns(std::move(required_columns_))
 {
     for (auto & column : result_columns)
     {
@@ -1043,12 +1054,8 @@ void ExpressionActionsChain::ArrayJoinStep::finalize(const NameSet & required_ou
 }
 
 ExpressionActionsChain::JoinStep::JoinStep(
-    std::shared_ptr<TableJoin> analyzed_join_,
-    JoinPtr join_,
-    const ColumnsWithTypeAndName & required_columns_)
-    : Step({})
-    , analyzed_join(std::move(analyzed_join_))
-    , join(std::move(join_))
+    std::shared_ptr<TableJoin> analyzed_join_, JoinPtr join_, const ColumnsWithTypeAndName & required_columns_)
+    : Step({}), analyzed_join(std::move(analyzed_join_)), join(std::move(join_))
 {
     for (const auto & column : required_columns_)
         required_columns.emplace_back(column.name, column.type);

@@ -2382,6 +2382,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         if (max_streams > 1 && !is_remote)
             max_streams = static_cast<size_t>(max_streams * settings.max_streams_to_max_threads_ratio);
 
+        // 这个位置在准备当前查询变换的数据输入
         auto & prewhere_info = analysis_result.prewhere_info;
 
         if (prewhere_info)
